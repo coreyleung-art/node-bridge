@@ -7,17 +7,22 @@ use std::time::Duration;
 pub struct Bb {
     host: String,
     port: u16,
+    token: String, // P1-1c: 黑板认证 token（可选，空=不带）
 }
 
 impl Bb {
     pub fn new(url: &str) -> Bb {
-        // 解析 http://host:port
+        Self::with_token(url, "")
+    }
+
+    /// 带 token 构造（P1-1c）
+    pub fn with_token(url: &str, token: &str) -> Bb {
         let u = url.trim_start_matches("http://").trim_end_matches('/');
         let (host, port) = match u.rfind(':') {
             Some(i) => (u[..i].to_string(), u[i + 1..].parse().unwrap_or(8792)),
             None => (u.to_string(), 8792),
         };
-        Bb { host, port }
+        Bb { host, port, token: token.to_string() }
     }
 
     /// 发请求，返回 (status, body_text)。Connection: close 简单模型。
@@ -30,9 +35,14 @@ impl Bb {
             .map_err(|e| format!("set timeout: {}", e))?;
 
         let body = body.unwrap_or("");
+        let token_hdr = if self.token.is_empty() {
+            String::new()
+        } else {
+            format!("X-Blackboard-Token: {}\r\n", self.token)
+        };
         let req = format!(
-            "{} {} HTTP/1.1\r\nHost: {}:{}\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
-            method, path, self.host, self.port, body.len(), body
+            "{} {} HTTP/1.1\r\nHost: {}:{}\r\n{}\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
+            method, path, self.host, self.port, token_hdr, body.len(), body
         );
         stream.write_all(req.as_bytes()).map_err(|e| format!("write: {}", e))?;
 

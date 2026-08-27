@@ -64,7 +64,7 @@ fn parse_args() -> Config {
         }
         i += 1;
     }
-    let bb = Bb::new(&bb_url);
+    let bb = Bb::with_token(&bb_url, &token);
     Config { node, bb, hb_secs: hb, queue_secs: queue, notes_secs: notes, no_llm, identity_path, token }
 }
 
