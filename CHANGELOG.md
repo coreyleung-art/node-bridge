@@ -1,3 +1,6 @@
+## v1.3.2 (2026-08-29)
+- **修复（P1-1c 阻塞级）**: bb.rs request() 请求头构造——token_hdr 自带 \r\n + 格式串再补一个 → header 出现空行提前结束，Content-Length 被吞进 body。带 token 时所有写入 value 变 {}（心跳/队列/notes 全空）、register 名字丢失（默认 device）。修复后 token 请求体完整送达
+- **修复**: 启动日志打印 DEFAULT_BB 常量而非实际 bb 地址（误导排查）；新增 Bb::addr() 访问器
 
 ## v1.3.0 (2026-08-28)
 - **新增**: --identity 参数（P1-3b）——启动时读/生成 identity.json（device_id + token），注册节点带 device_id

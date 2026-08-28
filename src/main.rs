@@ -305,7 +305,7 @@ fn main() {
     let cfg = parse_args();
     log(&format!(
         "node-bridge v{} start node={} bb={} (hb={}s queue={}s notes={}s)",
-        env!("CARGO_PKG_VERSION"), cfg.node, DEFAULT_BB, cfg.hb_secs, cfg.queue_secs, cfg.notes_secs
+        env!("CARGO_PKG_VERSION"), cfg.node, cfg.bb.addr(), cfg.hb_secs, cfg.queue_secs, cfg.notes_secs
     ));
 
     // P1-3b: 设备 identity（读/生成 identity.json）

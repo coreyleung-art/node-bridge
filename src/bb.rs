@@ -15,6 +15,11 @@ impl Bb {
         Self::with_token(url, "")
     }
 
+    /// 调试用：黑板地址（host:port）
+    pub fn addr(&self) -> String {
+        format!("{}:{}", self.host, self.port)
+    }
+
     /// 带 token 构造（P1-1c）
     pub fn with_token(url: &str, token: &str) -> Bb {
         let u = url.trim_start_matches("http://").trim_end_matches('/');
@@ -35,10 +40,12 @@ impl Bb {
             .map_err(|e| format!("set timeout: {}", e))?;
 
         let body = body.unwrap_or("");
+        // v1.3.2 修复：token_hdr 不带尾部 \r\n（此前自带 \r\n + 格式串再补一个 → header 出现空行提前结束，
+        // Content-Length 被吞进 body → 带 token 时所有写入 value 变 {}、register 名字丢失）
         let token_hdr = if self.token.is_empty() {
             String::new()
         } else {
-            format!("X-Blackboard-Token: {}\r\n", self.token)
+            format!("X-Blackboard-Token: {}", self.token)
         };
         let req = format!(
             "{} {} HTTP/1.1\r\nHost: {}:{}\r\n{}\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
