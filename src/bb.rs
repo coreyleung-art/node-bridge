@@ -40,15 +40,16 @@ impl Bb {
             .map_err(|e| format!("set timeout: {}", e))?;
 
         let body = body.unwrap_or("");
-        // v1.3.2 修复：token_hdr 不带尾部 \r\n（此前自带 \r\n + 格式串再补一个 → header 出现空行提前结束，
-        // Content-Length 被吞进 body → 带 token 时所有写入 value 变 {}、register 名字丢失）
+        // v1.3.2 修复：token_hdr 自带尾部 \r\n，格式串只放一个 {} 占位不再补 \r\n
+        // （此前 token_hdr 带 \r\n + 格式串再补 \r\n → 空 token 时也出现空行提前结束 header，
+        //   Content-Length 被吞进 body → 写入 value 全变 {}、register 名字丢失）
         let token_hdr = if self.token.is_empty() {
             String::new()
         } else {
-            format!("X-Blackboard-Token: {}", self.token)
+            format!("X-Blackboard-Token: {}\r\n", self.token)
         };
         let req = format!(
-            "{} {} HTTP/1.1\r\nHost: {}:{}\r\n{}\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
+            "{} {} HTTP/1.1\r\nHost: {}:{}\r\n{}Content-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
             method, path, self.host, self.port, token_hdr, body.len(), body
         );
         stream.write_all(req.as_bytes()).map_err(|e| format!("write: {}", e))?;
