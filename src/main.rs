@@ -8,6 +8,7 @@ mod llm;
 mod logger;
 
 use bb::Bb;
+use serde_json::json;
 use std::time::Duration;
 
 const DEFAULT_BB: &str = "http://100.120.203.20:8792";
@@ -21,6 +22,7 @@ struct Config {
     no_llm: bool,
     identity_path: Option<String>, // P1-3b: identity.json 路径
     token: String,                 // P1-1c: 黑板认证 token
+    collab_subs: Option<Vec<String>>, // v1.4.0: collab 前缀订阅（如 ops-*），白名单过滤用
 }
 
 impl Clone for Config {
@@ -34,6 +36,7 @@ impl Clone for Config {
             no_llm: self.no_llm,
             identity_path: self.identity_path.clone(),
             token: self.token.clone(),
+            collab_subs: self.collab_subs.clone(),
         }
     }
 }
@@ -48,6 +51,7 @@ fn parse_args() -> Config {
     let mut no_llm = false;
     let mut identity_path: Option<String> = None;
     let mut token = String::new();
+    let mut collab_subs: Option<Vec<String>> = None;
 
     let mut i = 1;
     while i < args.len() {
@@ -60,12 +64,13 @@ fn parse_args() -> Config {
             "--no-llm" => { no_llm = true; }
             "--identity" => { i += 1; if i < args.len() { identity_path = Some(args[i].clone()); } }
             "--token" => { i += 1; if i < args.len() { token = args[i].clone(); } }
+            "--collab-subs" => { i += 1; if i < args.len() { collab_subs = Some(args[i].split(",").map(|s| s.trim().to_string()).filter(|s| !s.is_empty()).collect()); } }
             _ => {}
         }
         i += 1;
     }
     let bb = Bb::with_token(&bb_url, &token);
-    Config { node, bb, hb_secs: hb, queue_secs: queue, notes_secs: notes, no_llm, identity_path, token }
+    Config { node, bb, hb_secs: hb, queue_secs: queue, notes_secs: notes, no_llm, identity_path, token, collab_subs }
 }
 
 fn now() -> String {
@@ -254,8 +259,48 @@ fn notes_loop(cfg: &Config) {
                         // 若不过滤：① 全量落盘 inbox 污染 ② LLM 执行器误处理其他节点历史 llm:true 消息（意外烧 token）
                         // 本节点接收：notes/{node}/*（自己的）+ notes/mac-mini/*（中枢通道，跨设备互通）
                         // 注意：mac-mini 中枢通道只在 node==mac-mini 时自己处理；其他节点要收中枢消息走 notes/{node}/coordinator-*
-                        let relevant = k.starts_with(&format!("notes/{}/", cfg.node))
-                            || k.starts_with("notes/collab/");
+                        // v1.4.0 通道卫生（2026-08-30 用户审计）：collab 白名单过滤——
+                        //   背景：同盟法辅等独立项目误走 notes/collab/ 广播，i9/MBP 全量收 → 无关项目污染上下文
+                        //   规则：collab 消息仅当 ① 显式 to/target/@提及 本节点 ② 本节点在 mentions 列表 才接收；
+                        //         纯全局公告（无定向字段）默认跳过（避免无关项目广播进 inbox）
+                        //   注意：mac-mini 中枢仍收全量 collab（它负责协调/巡检/纠偏）
+                        let mut relevant = k.starts_with(&format!("notes/{}/", cfg.node));
+                        if !relevant && k.starts_with("notes/collab/") {
+                            if cfg.node == "mac-mini" {
+                                relevant = true; // 中枢全量收（协调职责）
+                            } else {
+                                // 端节点：collab 白名单——定向到本节点才收
+                                let v = map.get(k.as_str()).and_then(|e| e.get("value")).cloned().unwrap_or(json!({}));
+                                let v_obj = v.as_object().cloned().unwrap_or_default();
+                                let val_obj = v_obj.get("value").and_then(|x| x.as_object()).cloned().unwrap_or_default();
+                                let mut targeted = false;
+                                // 顶层 to / value.to / value.target
+                                for field in ["to", "target"] {
+                                    if let Some(t) = v_obj.get(field).or_else(|| val_obj.get(field)) {
+                                        if let Some(s) = t.as_str() {
+                                            if s == cfg.node || s.contains(cfg.node.as_str()) { targeted = true; }
+                                        }
+                                    }
+                                }
+                                // mentions 列表（@session 提及）
+                                if let Some(m) = val_obj.get("mentions").and_then(|x| x.as_array()) {
+                                    for mi in m {
+                                        if let Some(s) = mi.as_str() {
+                                            if s.contains(cfg.node.as_str()) || s.contains(cfg.node.as_str()) { targeted = true; }
+                                        }
+                                    }
+                                }
+                                // topic 前缀订阅（node-bridge 自定义订阅，如 notes/collab/ops-*）
+                                if let Some(subs) = cfg.collab_subs.as_ref() {
+                                    if subs.iter().any(|p| k.starts_with(&format!("notes/collab/{}", p))) {
+                                        targeted = true;
+                                    }
+                                }
+                                if !targeted {
+                                    continue; // 无关 collab 消息跳过（通道卫生 P0a）
+                                }
+                            }
+                        }
                         if !relevant {
                             continue;
                         }
