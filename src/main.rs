@@ -6,6 +6,7 @@ mod bb;
 mod exec;
 mod llm;
 mod logger;
+mod signature;
 
 use bb::Bb;
 use serde_json::json;
@@ -225,9 +226,23 @@ fn outbox_loop(cfg: &Config) {
                     .and_then(|t| t.as_str())
                     .map(|s| s.to_string())
                     .unwrap_or_else(|| topic.clone());
+                // P1-3d 消息签名（Ed25519 防伪造）：签名规范化 body → 附 signature + signer
+                let mut signed_value = value.clone();
+                if let Some(idp) = &cfg.identity_path {
+                    if let Ok((priv_k, pub_k)) = signature::ensure_keys(std::path::Path::new(idp)) {
+                        let body_str = signed_value.to_string();
+                        if let Ok(sig) = signature::sign_message(&priv_k, &body_str) {
+                            if let Some(obj) = signed_value.as_object_mut() {
+                                obj.insert("signature".to_string(), serde_json::Value::String(sig));
+                                obj.insert("signer_pub".to_string(), serde_json::Value::String(pub_k));
+                            }
+                            log("P1-3d signed (ed25519)");
+                        }
+                    }
+                }
                 // 转发到黑板（支持跨节点）
                 let bb_path = format!("/notes/{}/{}", target_node, effective_topic);
-                match cfg.bb.put_json(&bb_path, &value) {
+                match cfg.bb.put_json(&bb_path, &signed_value) {
                     Ok((st, _)) => {
                         if st == 200 {
                             let _ = std::fs::remove_file(&path);
