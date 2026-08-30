@@ -278,7 +278,13 @@ fn notes_loop(cfg: &Config) {
                                         continue; // 已处理过的 LLM 消息跳过（防重复触发）
                                     }
                                     let _ = std::fs::create_dir_all(&inbox);
-                                    let _ = std::fs::write(&fpath, val.to_string());
+                                    // v1.3.3 修复（i9 崩溃）：原子写 inbox——tmp 文件 + rename，
+                                    // 避免与 llm_loop 的 rename 并发竞争同一目标（Windows 文件句柄冲突→静默退出）
+                                    let _ = std::fs::create_dir_all(&inbox.join(".tmp"));
+                                    let tmp_path = inbox.join(".tmp").join(format!("{}.tmp", safe));
+                                    if std::fs::write(&tmp_path, val.to_string()).is_ok() {
+                                        let _ = std::fs::rename(&tmp_path, &fpath);
+                                    }
                                 }
                             }
                         }
